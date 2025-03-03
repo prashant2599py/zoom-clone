@@ -1,46 +1,96 @@
-import React, { useCallback, useEffect } from "react";
+import React, { useCallback, useEffect, useState } from "react";
+import ReactPlayer from 'react-player';
 import { useSocket } from "../providers/Socket";
-import { usePeer } from "../providers/Peer";
+import peer from "../services/peer";
 
-const RoomPage = () => {
-    const { socket }  = useSocket();
-    const { peer, createOffer, setRemoteAnswer } = usePeer();
+export const RoomPage = () => {
+    
+    const socket = useSocket();
+    const [remoteSocketId, setRemoteSocketId] = useState();
+    const [myStream, setMyStream] = useState();
+    const [remoteStream, setRemoteStream] = useState();
 
-    const handleNewUserJoinedRoom = useCallback(async (data) => {
-        const { emailId } = data;
-        console.log('New user joined room ', emailId)
-        const offer = await createOffer();
-        socket.emit('call-user', { emailId, offer })
-    },[createOffer, socket])
 
-    const handleIncommingCall = useCallback( async (data) => {
-        const {from, offer } = data;
-        console.log('Incomming call from ', from, offer)
-        const ans = await createAnswer(offer);
-        socket.emit('call-accepted', { emailId: from, ans})
+    const handleUserJoined = useCallback( ({ email, id }) => {
+        console.log(`new user ${email} joined`);
+        setRemoteSocketId(id);
+    },[])
+
+    const handleCallUser = useCallback( async () => {
+        const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+        
+        // creation of offer from user 1 , sends it to user 2
+        const offer = await peer.getOffer();
+        socket.emit('user:call', { to: remoteSocketId, offer })
+
+        setMyStream(stream);
+
+    },[remoteSocketId, socket])
+
+    const handleIncommingCall = useCallback(async ({ from, offer } ) => {
+        console.log(`incomming call `, from , offer);
+        
+        setRemoteSocketId(from);
+        
+        const stream = await navigator.mediaDevices.getUserMedia({video : true, audio: true});
+        setMyStream(stream);
+        
+        // Creation of answer by user 2 and sends it to user 1 for connection building 
+        const ans = await peer.getAnswer(offer);
+        socket.emit('call:accepted', { to: from, ans}) // emits the call:accepted event to user 1(from where call came) with answer
+
     },[socket])
 
-    const handleCallAccepted = useCallback(async (data) => {
-        console.log('Call accepted', ans)
-        const { ans } = data;
-        await setRemoteAnswer(ans);
-       
+    const handleCallAccepted = useCallback(( { from, ans }) => {
+        peer.setLocalDescription(ans);
+        console.log(`call accepted`, from, ans);
+        
+        for( const track of myStream.getTracks()){
+            peer.peer.addTrack(track, myStream);
+        }
+    }, [myStream])
+
+    useEffect(() => {
+        peer.peer.addEventListener('track', async ev => {
+            const stream = ev.streams;
+            setRemoteStream(stream[0]);
+        })
     })
+
     useEffect( () => {
-        socket.on('user-joined', handleNewUserJoinedRoom)
-        socket.on('incomming-call', handleIncommingCall);
-        socket.on('call-accepted', handleCallAccepted);
+        socket.on('user:joined', handleUserJoined)
+        socket.on('incomming:call', handleIncommingCall)  // incomming call handled here for acceptance
+        socket.on('call:accepted', handleCallAccepted)
 
         return () => {
-            socket.off('user-joined', handleNewUserJoinedRoom)
-            socket.off('incomming-call', handleIncommingCall)
+            socket.off('user:joined', handleUserJoined)
+            socket.off('incomming:call', handleIncommingCall)
+            socket.off('call:accepted', handleCallAccepted)
         }
-    },[socket,handleNewUserJoinedRoom, handleIncommingCall,handleCallAccepted])
+
+    },[socket, handleUserJoined, handleIncommingCall, handleCallAccepted])
+
     return (
         <div>
-            Room Page
+            <h1>Room Page</h1>
+            { remoteSocketId && <button onClick={handleCallUser}>CALL</button>}
+            { myStream &&
+            <>
+            <h2>MY STREAM</h2>
+                <ReactPlayer 
+                    playing 
+                    muted   
+                    url={myStream}
+                />
+            </> 
+            }
+            { remoteStream && 
+                <>
+                    <h2>Remote Stream</h2>
+                    <ReactPlayer playing muted   url={remoteStream}/>
+                </>     
+            }
         </div>
     )
 }
-
 export default RoomPage;
