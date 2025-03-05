@@ -41,56 +41,96 @@ export const RoomPage = () => {
 
     },[socket])
 
-    const handleCallAccepted = useCallback(( { from, ans }) => {
-        peer.setLocalDescription(ans);
-        console.log(`call accepted`, from, ans);
-        
-        for( const track of myStream.getTracks()){
+    const sendStreams = useCallback(() => {
+        for(const track of myStream.getTracks()){
             peer.peer.addTrack(track, myStream);
         }
-    }, [myStream])
+    },[myStream])
 
+    const handleCallAccepted = useCallback(( { from, ans }) => {
+        peer.setLocalDescription(ans);
+        console.log(`call accepted`, from, ans); 
+        sendStreams();      
+    }, [sendStreams])
+
+   
+
+    const handleNegotiationNeeded = useCallback( async() => {
+        const offer = await peer.getOffer();
+        socket.emit('peer:nego:needed', { offer, to: remoteSocketId})
+    }, [remoteSocketId, socket])
+
+    const handleNegotiaitionIncoming = useCallback( async({ from, offer}) => {
+        const ans = await peer.getAnswer(offer);
+        socket.emit('peer:nego:done', { to: from, ans });
+    }, [socket])
+
+    const handleNegotiaitionFinal = useCallback( async({ ans}) => {
+        await peer.setLocalDescription(ans);
+    },[])
+    
     useEffect(() => {
-        peer.peer.addEventListener('track', async ev => {
-            const stream = ev.streams;
-            setRemoteStream(stream[0]);
+        peer.peer.addEventListener('track', async (ev) => {
+            const remoteStream = ev.streams;
+            setRemoteStream(remoteStream[0]);
         })
+    },[])
+
+    useEffect( () => {
+        peer.peer.addEventListener('negotiation:needed', handleNegotiationNeeded)
+        return () => {
+            peer.peer.removeEventListener('negotiation:needed', handleNegotiationNeeded)
+        }
     })
 
     useEffect( () => {
         socket.on('user:joined', handleUserJoined)
         socket.on('incomming:call', handleIncommingCall)  // incomming call handled here for acceptance
         socket.on('call:accepted', handleCallAccepted)
+        socket.on('peer:nego:needed', handleNegotiaitionIncoming);
+        socket.on('peer:nego:final', handleNegotiaitionFinal);
 
         return () => {
             socket.off('user:joined', handleUserJoined)
             socket.off('incomming:call', handleIncommingCall)
             socket.off('call:accepted', handleCallAccepted)
+            socket.off('peer:nego:needed', handleNegotiaitionIncoming);
+            socket.off('peer:nego:final', handleNegotiaitionFinal);
         }
 
-    },[socket, handleUserJoined, handleIncommingCall, handleCallAccepted])
+    },[socket, handleUserJoined, handleIncommingCall, handleCallAccepted, handleNegotiaitionIncoming, handleNegotiaitionFinal])
 
     return (
         <div>
-            <h1>Room Page</h1>
-            { remoteSocketId && <button onClick={handleCallUser}>CALL</button>}
-            { myStream &&
-            <>
-            <h2>MY STREAM</h2>
-                <ReactPlayer 
-                    playing 
-                    muted   
-                    url={myStream}
-                />
-            </> 
-            }
-            { remoteStream && 
-                <>
-                    <h2>Remote Stream</h2>
-                    <ReactPlayer playing muted   url={remoteStream}/>
-                </>     
-            }
-        </div>
+      <h1>Room Page</h1>
+      <h4>{remoteSocketId ? "Connected" : "No one in room"}</h4>
+      {myStream && <button onClick={sendStreams}>Send Stream</button>}
+      {remoteSocketId && <button onClick={handleCallUser}>CALL</button>}
+      {myStream && (
+        <>
+          <h1>My Stream</h1>
+          <ReactPlayer
+            playing
+            muted
+            height="100px"
+            width="200px"
+            url={myStream}
+          />
+        </>
+      )}
+      {remoteStream && (
+        <>
+          <h1>Remote Stream</h1>
+          <ReactPlayer
+            playing
+            muted
+            height="100px"
+            width="200px"
+            url={remoteStream}
+          />
+        </>
+      )}
+    </div>
     )
 }
 export default RoomPage;

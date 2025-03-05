@@ -48,6 +48,14 @@ io.on('connection', (socket) => {
         socket.to(to).emit('call:accepted', { from : socket.id, ans }); // emits the call accepted event to user 1
     })
 
+    socket.on('peer:nego:needed', ({ to, offer}) => {
+        socket.to(to).emit('peer:nego:needed', { from: socket.id, offer})
+    })
+
+    socket.on('peer:nego:done', ({ to, ans }) => {
+        socket.to(to).emit('peer:nego:final', { from: socket.id, ans})
+    })
+
     // socket.on('call-user', (data) => {
     //     const {emailId, offer} = data;
     //     const fromEmail = socketToEmailMapping.get(socket.id)
